@@ -9,7 +9,6 @@ from openai import OpenAI
 
 # --- API 키는 Railway 환경변수에서 가져옴 ---
 TOKEN = os.getenv("TELEGRAM_TOKEN")
-ALPHA_KEY = os.getenv("ALPHA_VANTAGE_KEY")
 DEEPSEEK_KEY = os.getenv("DEEPSEEK_API_KEY")
 
 # Railway가 자동으로 할당하는 포트 & 도메인
@@ -17,7 +16,7 @@ PORT = int(os.getenv("PORT", "8080"))
 RAILWAY_DOMAIN = os.getenv("RAILWAY_PUBLIC_DOMAIN", "localhost")
 
 # 데이터 & AI 클라이언트
-ts = TimeSeries(key=ALPHA_KEY, output_format="pandas")
+ts = TimeSeries(output_format="pandas")
 ai = OpenAI(api_key=DEEPSEEK_KEY, base_url="https://api.deepseek.com/v1")
 
 # --- 텔레그램 명령어 처리 ---
