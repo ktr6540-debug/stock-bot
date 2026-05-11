@@ -1,214 +1,83 @@
 import os
-import asyncio
-from aiohttp import web
-
+import pandas as pd
 from telegram import Update
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    MessageHandler,
-    filters,
-)
-
+from telegram.ext import Application, CommandHandler, MessageHandler, filters
 from alpha_vantage.timeseries import TimeSeries
 from openai import OpenAI
 
+# --- Railway 환경 변수에서 API 키 읽어오기 ---
+TOKEN = os.getenv("TELEGRAM_TOKEN")
+DEEPSEEK_KEY = os.getenv("DEEPSEEK_API_KEY")
+ALPHA_KEY = os.getenv("ALPHAVANTAGE_API_KEY")  # Railway에 등록된 이름과 동일
 
-# ======================================
-# 환경변수 불러오기
-# ======================================
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
-ALPHAVANTAGE_API_KEY = os.getenv("ALPHAVANTAGE_API_KEY")
+# --- 데이터 & AI 클라이언트 초기화 ---
+ts = TimeSeries(key=ALPHA_KEY, output_format="pandas")
+ai = OpenAI(api_key=DEEPSEEK_KEY, base_url="https://api.deepseek.com/v1")
 
-# Railway 포트
-PORT = int(os.getenv("PORT", "8080"))
-
-# Railway 도메인
-# 반드시 본인 Railway 도메인으로 수정!!
-RAILWAY_DOMAIN = "web-production-56619.up.railway.app"
-
-
-# ======================================
-# 환경변수 체크
-# ======================================
-if not TELEGRAM_TOKEN:
-    raise ValueError("TELEGRAM_TOKEN 환경변수가 없습니다.")
-
-if not DEEPSEEK_API_KEY:
-    raise ValueError("DEEPSEEK_API_KEY 환경변수가 없습니다.")
-
-if not ALPHAVANTAGE_API_KEY:
-    raise ValueError("ALPHAVANTAGE_API_KEY 환경변수가 없습니다.")
-
-
-# ======================================
-# Alpha Vantage
-# ======================================
-ts = TimeSeries(
-    key=ALPHAVANTAGE_API_KEY,
-    output_format="pandas"
-)
-
-
-# ======================================
-# DeepSeek
-# ======================================
-ai = OpenAI(
-    api_key=DEEPSEEK_API_KEY,
-    base_url="https://api.deepseek.com/v1"
-)
-
-
-# ======================================
-# /start
-# ======================================
+# --- 텔레그램 명령어 처리 ---
 async def start(update: Update, context):
     await update.message.reply_text(
-        "안녕하세요 👋\n\n"
-        "미국 주식 심볼을 보내주세요!\n\n"
-        "예시:\n"
-        "AAPL\n"
-        "TSLA\n"
-        "MSFT\n"
-        "NVDA"
+        "👋 안녕하세요! 투자 분석 봇입니다.\n"
+        "종목 심볼(예: AAPL, TSLA, 005930.KS)을 보내주시면 AI가 분석해드립니다."
     )
 
-
-# ======================================
-# 종목 분석
-# ======================================
 async def analyze(update: Update, context):
-
     symbol = update.message.text.upper().strip()
-
-    await update.message.reply_text(
-        f"{symbol} 분석 중입니다 ⏳"
-    )
-
+    await update.message.reply_text(f"🔍 {symbol} 분석 중... 잠시만 기다려 주세요 ⏳")
+    
     try:
+        # Alpha Vantage에서 최근 30일 일봉 데이터 가져오기
+        data, _ = ts.get_daily(symbol=symbol, outputsize="compact")
+        close_prices = data["4. close"].head(30).to_string()
 
-        # 최근 주가 데이터 가져오기
-        data, meta_data = ts.get_daily(
-            symbol=symbol,
-            outputsize="compact"
-        )
-
-        # 최근 30일 종가
-        close_prices = data["4. close"].head(30)
-
-        # 문자열 변환
-        close_text = close_prices.to_string()
-
-        # DeepSeek 분석
+        # DeepSeek V4에 분석 요청
         response = ai.chat.completions.create(
-            model="deepseek-chat",
+            model="deepseek-v4-flash",  # 또는 deepseek-v4-pro
             messages=[
                 {
                     "role": "system",
                     "content": (
-                        "당신은 전문 투자 분석가입니다.\n"
-                        "주어진 주가 데이터를 분석해서:\n"
-                        "- 현재 추세\n"
-                        "- 지지선\n"
-                        "- 저항선\n"
-                        "- 단기 전망\n"
-                        "- 투자 리스크\n"
-                        "- 투자 의견\n"
-                        "을 한국어로 쉽게 설명해주세요."
+                        "당신은 전문 투자 분석가입니다. "
+                        "주어진 주가 데이터를 바탕으로 다음 내용을 분석해주세요:\n"
+                        "- 최근 추세 (상승/하락/횡보)\n"
+                        "- 주요 지지선과 저항선\n"
+                        "- 거래량 동향 (가능한 경우)\n"
+                        "- 단기 투자 의견 (보수적 관점)"
                     )
                 },
                 {
                     "role": "user",
-                    "content": (
-                        f"{symbol} 최근 30일 종가 데이터:\n\n"
-                        f"{close_text}\n\n"
-                        "분석해주세요."
-                    )
+                    "content": f"{symbol} 최근 30일 종가 데이터:\n{close_prices}\n\n위 데이터를 분석해주세요."
                 }
             ],
-            temperature=0.7,
+            temperature=1.0,
+            top_p=1.0
         )
 
-        result = response.choices[0].message.content
+        analysis = response.choices[0].message.content
 
-        await update.message.reply_text(result)
+        # 텔레그램 메시지 길이 제한(4096자) 처리
+        if len(analysis) > 4000:
+            for i in range(0, len(analysis), 4000):
+                await update.message.reply_text(analysis[i:i+4000])
+        else:
+            await update.message.reply_text(f"📊 {symbol} 분석 결과:\n\n{analysis}")
 
     except Exception as e:
+        await update.message.reply_text(f"❌ 오류가 발생했습니다: {e}")
 
-        await update.message.reply_text(
-            f"오류 발생:\n{str(e)}"
-        )
+# --- 메인 실행 (폴링 방식) ---
+def main():
+    # 텔레그램 봇 애플리케이션 생성
+    app = Application.builder().token(TOKEN).build()
 
-
-# ======================================
-# Health Check
-# ======================================
-async def health(request):
-    return web.Response(text="Bot is running!")
-
-
-# ======================================
-# 메인 실행
-# ======================================
-async def main():
-
-    # 텔레그램 앱 생성
-    app = Application.builder().token(TELEGRAM_TOKEN).build()
-
-    # 핸들러 등록
+    # 명령어 핸들러 등록
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, analyze))
 
-    app.add_handler(
-        MessageHandler(
-            filters.TEXT & ~filters.COMMAND,
-            analyze
-        )
-    )
+    print("🤖 봇이 폴링 모드로 시작되었습니다...")
+    # 폴링 시작 (에러 발생 시 자동 재시도)
+    app.run_polling(drop_pending_updates=True)
 
-    # 웹훅 URL
-    webhook_url = f"https://{RAILWAY_DOMAIN}/telegram"
-
-    # 웹훅 설정
-    await app.bot.set_webhook(webhook_url)
-
-    # 앱 초기화
-    await app.initialize()
-    await app.start()
-
-    # 웹훅 시작
-    await app.updater.start_webhook(
-        listen="0.0.0.0",
-        port=PORT,
-        url_path="telegram",
-        webhook_url=webhook_url,
-    )
-
-    # Health Check 서버
-    web_app = web.Application()
-
-    web_app.router.add_get("/", health)
-
-    runner = web.AppRunner(web_app)
-
-    await runner.setup()
-
-    site = web.TCPSite(
-        runner,
-        "0.0.0.0",
-        PORT
-    )
-
-    await site.start()
-
-    print("Bot started successfully!")
-
-    # 무한 실행 유지
-    await asyncio.Event().wait()
-
-
-# ======================================
-# 시작
-# ======================================
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
