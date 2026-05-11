@@ -1,5 +1,8 @@
-print("TELEGRAM_TOKEN exists:", bool(os.getenv("TELEGRAM_TOKEN")))
 import os
+
+print("TELEGRAM_TOKEN exists:", bool(os.getenv("TELEGRAM_TOKEN")))
+print("DEEPSEEK_API_KEY exists:", bool(os.getenv("DEEPSEEK_API_KEY")))
+print("ALPHAVANTAGE_API_KEY exists:", bool(os.getenv("ALPHAVANTAGE_API_KEY")))
 import asyncio
 from aiohttp import web
 
