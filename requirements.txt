@@ -1,5 +1,6 @@
-python-telegram-bot[webhooks]>=20.0
+python-telegram-bot>=20.0
 alpha_vantage
 openai
 pandas
-aiohttp
+requests
+finance-datareader
