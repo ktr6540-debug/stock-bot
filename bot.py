@@ -1,76 +1,214 @@
 import os
 import asyncio
-import pandas as pd
 from aiohttp import web
+
 from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    MessageHandler,
+    filters,
+)
+
 from alpha_vantage.timeseries import TimeSeries
 from openai import OpenAI
 
-# --- API 키는 Railway 환경변수에서 가져옴 ---
-TOKEN = os.getenv("TELEGRAM_TOKEN")
-DEEPSEEK_KEY = os.getenv("DEEPSEEK_API_KEY")
 
-# Railway가 자동으로 할당하는 포트 & 도메인
+# ======================================
+# 환경변수 불러오기
+# ======================================
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
+ALPHAVANTAGE_API_KEY = os.getenv("ALPHAVANTAGE_API_KEY")
+
+# Railway 포트
 PORT = int(os.getenv("PORT", "8080"))
-RAILWAY_DOMAIN = os.getenv("RAILWAY_PUBLIC_DOMAIN", "localhost")
 
-# 데이터 & AI 클라이언트
-ts = TimeSeries(output_format="pandas")
-ai = OpenAI(api_key=DEEPSEEK_KEY, base_url="https://api.deepseek.com/v1")
+# Railway 도메인
+# 반드시 본인 Railway 도메인으로 수정!!
+RAILWAY_DOMAIN = "web-production-56619.up.railway.app"
 
-# --- 텔레그램 명령어 처리 ---
+
+# ======================================
+# 환경변수 체크
+# ======================================
+if not TELEGRAM_TOKEN:
+    raise ValueError("TELEGRAM_TOKEN 환경변수가 없습니다.")
+
+if not DEEPSEEK_API_KEY:
+    raise ValueError("DEEPSEEK_API_KEY 환경변수가 없습니다.")
+
+if not ALPHAVANTAGE_API_KEY:
+    raise ValueError("ALPHAVANTAGE_API_KEY 환경변수가 없습니다.")
+
+
+# ======================================
+# Alpha Vantage
+# ======================================
+ts = TimeSeries(
+    key=ALPHAVANTAGE_API_KEY,
+    output_format="pandas"
+)
+
+
+# ======================================
+# DeepSeek
+# ======================================
+ai = OpenAI(
+    api_key=DEEPSEEK_API_KEY,
+    base_url="https://api.deepseek.com/v1"
+)
+
+
+# ======================================
+# /start
+# ======================================
 async def start(update: Update, context):
-    await update.message.reply_text("종목 심볼(예: AAPL)을 보내주세요!")
+    await update.message.reply_text(
+        "안녕하세요 👋\n\n"
+        "미국 주식 심볼을 보내주세요!\n\n"
+        "예시:\n"
+        "AAPL\n"
+        "TSLA\n"
+        "MSFT\n"
+        "NVDA"
+    )
 
+
+# ======================================
+# 종목 분석
+# ======================================
 async def analyze(update: Update, context):
+
     symbol = update.message.text.upper().strip()
-    await update.message.reply_text(f"{symbol} 분석 중... 조금만 기다려 주세요 ⏳")
+
+    await update.message.reply_text(
+        f"{symbol} 분석 중입니다 ⏳"
+    )
+
     try:
-        data, _ = ts.get_daily(symbol=symbol, outputsize="compact")
-        close_prices = data["4. close"].head(30).to_string()
-        response = ai.chat.completions.create(
-            model="deepseek-v4-flash",
-            messages=[
-                {"role": "system", "content": "당신은 전문 투자 분석가입니다. 주어진 주가 데이터를 바탕으로 추세, 지지/저항선, 간단한 투자 의견을 알려주세요."},
-                {"role": "user", "content": f"{symbol} 최근 30일 종가:\n{close_prices}\n\n분석해주세요."}
-            ]
+
+        # 최근 주가 데이터 가져오기
+        data, meta_data = ts.get_daily(
+            symbol=symbol,
+            outputsize="compact"
         )
-        await update.message.reply_text(response.choices[0].message.content)
+
+        # 최근 30일 종가
+        close_prices = data["4. close"].head(30)
+
+        # 문자열 변환
+        close_text = close_prices.to_string()
+
+        # DeepSeek 분석
+        response = ai.chat.completions.create(
+            model="deepseek-chat",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "당신은 전문 투자 분석가입니다.\n"
+                        "주어진 주가 데이터를 분석해서:\n"
+                        "- 현재 추세\n"
+                        "- 지지선\n"
+                        "- 저항선\n"
+                        "- 단기 전망\n"
+                        "- 투자 리스크\n"
+                        "- 투자 의견\n"
+                        "을 한국어로 쉽게 설명해주세요."
+                    )
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"{symbol} 최근 30일 종가 데이터:\n\n"
+                        f"{close_text}\n\n"
+                        "분석해주세요."
+                    )
+                }
+            ],
+            temperature=0.7,
+        )
+
+        result = response.choices[0].message.content
+
+        await update.message.reply_text(result)
+
     except Exception as e:
-        await update.message.reply_text(f"오류 발생: {e}")
 
-# --- 메인 서버 ---
+        await update.message.reply_text(
+            f"오류 발생:\n{str(e)}"
+        )
+
+
+# ======================================
+# Health Check
+# ======================================
+async def health(request):
+    return web.Response(text="Bot is running!")
+
+
+# ======================================
+# 메인 실행
+# ======================================
 async def main():
-    # 텔레그램 봇 애플리케이션
-    app = Application.builder().token(TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, analyze))
 
-    # 웹훅 설정 (Railway 도메인으로 자동 연결)
+    # 텔레그램 앱 생성
+    app = Application.builder().token(TELEGRAM_TOKEN).build()
+
+    # 핸들러 등록
+    app.add_handler(CommandHandler("start", start))
+
+    app.add_handler(
+        MessageHandler(
+            filters.TEXT & ~filters.COMMAND,
+            analyze
+        )
+    )
+
+    # 웹훅 URL
     webhook_url = f"https://{RAILWAY_DOMAIN}/telegram"
+
+    # 웹훅 설정
     await app.bot.set_webhook(webhook_url)
 
-    # Railway health check용 웹 서버
-    async def health(request):
-        return web.Response(text="OK")
-    web_app = web.Application()
-    web_app.add_routes([web.get("/", health)])
-    # 텔레그램 업데이트 받을 경로
+    # 앱 초기화
+    await app.initialize()
+    await app.start()
+
+    # 웹훅 시작
     await app.updater.start_webhook(
         listen="0.0.0.0",
         port=PORT,
+        url_path="telegram",
         webhook_url=webhook_url,
-        url_path="telegram"
     )
 
+    # Health Check 서버
+    web_app = web.Application()
+
+    web_app.router.add_get("/", health)
+
     runner = web.AppRunner(web_app)
+
     await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", PORT)
+
+    site = web.TCPSite(
+        runner,
+        "0.0.0.0",
+        PORT
+    )
+
     await site.start()
 
-    # 서버 종료될 때까지 대기
+    print("Bot started successfully!")
+
+    # 무한 실행 유지
     await asyncio.Event().wait()
 
+
+# ======================================
+# 시작
+# ======================================
 if __name__ == "__main__":
     asyncio.run(main())
