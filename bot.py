@@ -1,3 +1,4 @@
+print("TELEGRAM_TOKEN exists:", bool(os.getenv("TELEGRAM_TOKEN")))
 import os
 import asyncio
 from aiohttp import web
