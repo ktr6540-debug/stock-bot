@@ -1,0 +1,12 @@
+{
+  "name": "RISE 60:40 주간 전환 계산기",
+  "short_name": "RISE 60:40",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#111827",
+  "theme_color": "#165dff",
+  "icons": [
+    {"src":"./icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}
+  ]
+}
