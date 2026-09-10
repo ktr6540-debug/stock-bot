@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#165dff">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>RISE 60:40 계산기</title>
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="icon" href="./icon.svg" type="image/svg+xml">
+<style>body{margin:0;background:#111827;color:#fff;font-family:system-ui,-apple-system,"Noto Sans KR",sans-serif;display:grid;place-items:center;min-height:100vh}main{text-align:center;padding:24px}small{color:#94a3b8}</style>
+</head>
+<body>
+<main><h2>RISE 60:40 계산기</h2><small>최신 버전을 불러오는 중…</small></main>
+<script>
+(async()=>{
+  try{
+    const url='https://jlruzlwqdndkyagfxtap.supabase.co/functions/v1/rise-6040-calculator?ts='+Date.now();
+    const r=await fetch(url,{cache:'no-store'});
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    let html=await r.text();
+    const pwa=`<link rel="manifest" href="./manifest.webmanifest"><link rel="icon" href="./icon.svg" type="image/svg+xml"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes">`;
+    html=html.replace('</head>',pwa+'</head>');
+    document.open('text/html','replace');
+    document.write(html);
+    document.close();
+  }catch(e){
+    document.body.innerHTML='<main><h2>페이지를 불러오지 못했습니다</h2><small>'+String(e)+'</small></main>';
+  }
+})();
+</script>
+</body>
+</html>
