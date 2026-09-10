@@ -1,0 +1,5 @@
+[build]
+  publish = "docs"
+
+[build.environment]
+  NODE_VERSION = "22"
